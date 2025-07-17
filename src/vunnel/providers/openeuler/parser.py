@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 
 
 class Parser:
-    _cvrf_dir = "openeuler-cvrf"
-    _cvrf_filename = "index.txt"
+    _cvrf_dir = "openeuler"
+    _cvrf_index = "index.txt"
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class Parser:
         logger: logging.Logger | None = None,
     ):
         self.download_timeout = download_timeout
-        self.advisories_dir_path = Path(workspace.input_path) / self._advisories_dir
+        self.cvrf_dir_path = Path(workspace.input_path) / self._cvrf_dir
         self.url = url
         self.namespace = namespace
 
@@ -44,13 +44,13 @@ class Parser:
         :return:
         """
         if not os.path.exists(self.advisories_dir_path):
-            os.makedirs(self.advisories_dir_path, exist_ok=True)
+            os.makedirs(self.cvrf_dir_path, exist_ok=True)
 
         try:
-            self.logger.info(f"downloading {self.namespace} advisories {self.url}")
+            self.logger.info(f"downloading {self.namespace} cvrf index file {self.url}")
             r = http.get(self.url, self.logger, stream=True, timeout=self.download_timeout)
-            file_path = self.advisories_dir_path / self._advisories_filename
-            with open(file_path, "wb") as fp:
+            index_path = self.cvrf_dir_path / self._cvrf_index
+            with open(index_path, "wb") as fp:
                 for chunk in r.iter_content():
                     fp.write(chunk)
         except Exception:
