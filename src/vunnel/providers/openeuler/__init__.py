@@ -26,8 +26,7 @@ class Config:
 class Provider(provider.Provider):
     __schema__ = schema.OSSchema()
     __distribution_version__ = int(__schema__.major_version)
-
-    _url = "https://repo.openeuler.org/security/data/cvrf/"
+    _url = "https://repo.openeuler.org/security/data/cvrf"
     _namespace = "openeuler"
 
     def __init__(self, root: str, config: Config | None = None):
@@ -55,12 +54,11 @@ class Provider(provider.Provider):
 
     def update(self, last_updated: datetime.datetime | None) -> tuple[list[str], int]:
         with self.results_writer() as writer:
-            for release, vuln_dict in self.parser.get():
+            for vuln_dict in self.parser.get():
                 for vuln_id, record in vuln_dict.items():
                     writer.write(
-                        identifier=os.path.join(f"{self._namespace.lower()}:{release.lower()}", vuln_id),
+                        identifier=os.path.join(f"{self._namespace.lower()}", vuln_id),
                         schema=self.__schema__,
                         payload=record,
                     )
-
         return [self._url], len(writer)
