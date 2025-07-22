@@ -3,28 +3,24 @@ from __future__ import annotations
 import copy
 import logging
 import xml.etree.ElementTree as ET
-import os
-import json
-import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from tqdm import tqdm
 from typing import TYPE_CHECKING, Any
 
-import orjson
+import requests
+from tqdm import tqdm
 
 from vunnel.utils import http_wrapper as http
 from vunnel.utils.vulnerability import vulnerability_element
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
 
     from vunnel import workspace
 
 NAMESPACES = {
-    'cvrf': 'http://www.icasi.org/CVRF/schema/cvrf/1.1',
-    'prod': 'http://www.icasi.org/CVRF/schema/prod/1.1',
-    'vuln': 'http://www.icasi.org/CVRF/schema/vuln/1.1'
+    "cvrf": "http://www.icasi.org/CVRF/schema/cvrf/1.1",
+    "prod": "http://www.icasi.org/CVRF/schema/prod/1.1",
+    "vuln": "http://www.icasi.org/CVRF/schema/vuln/1.1",
 }
 
 class Parser:
@@ -67,56 +63,56 @@ class Parser:
         # download all cvrf file, for example, `2025/cvrf-openEuler-SA-2025-1834.xml`
         with ThreadPoolExecutor() as executor:
             futures = {executor.submit(self._fetch_data, file): file for file in files}
-            for future in tqdm(as_completed(futures), total=len(files), desc="downloading {self.namespace} CVRF files"):
+            for future in tqdm(as_completed(futures), total=len(files), desc=f"downloading {self.namespace} CVRF files"):
                 file = futures[future]
                 try:
                     data = future.result()
                     if data:
                         self.cvrfs[file] = data
                 except Exception as e:
-                    self.logger.warning(f"Failed to download {file}: {str(e)}")
-    
+                    self.logger.warning(f"Failed to download {file}: {e!s}")
+
     def _parse_cves_from_cvrf(self, cvrf: tuple):
         cve_record = []
         url, content = cvrf
         root = ET.fromstring(content.text)
-        for vulnerability in root.findall('.//vuln:Vulnerability', NAMESPACES):
+        for vulnerability in root.findall(".//vuln:Vulnerability", NAMESPACES):
             record = copy.deepcopy(vulnerability_element)
-            record["Vulnerability"]["Name"] = vulnerability.find('vuln:CVE', NAMESPACES).text
+            record["Vulnerability"]["Name"] = vulnerability.find("vuln:CVE", NAMESPACES).text
             record["Vulnerability"]["NamespaceName"] = f"{self.namespace}:{url.split('/')[0]}"
-            record["Vulnerability"]["Link"] = vulnerability.find('.//vuln:Remediation/vuln:URL', NAMESPACES).text
+            record["Vulnerability"]["Link"] = vulnerability.find(".//vuln:Remediation/vuln:URL", NAMESPACES).text
             record["Vulnerability"]["Description"] = vulnerability.find('.//vuln:Note[@Title="Vulnerability Description"]', NAMESPACES).text
-            record["Vulnerability"]["Severity"] = vulnerability.find('.//vuln:Threat/vuln:Description', NAMESPACES).text
+            record["Vulnerability"]["Severity"] = vulnerability.find(".//vuln:Threat/vuln:Description", NAMESPACES).text
             # Get CVSS
-            cvss_scores = vulnerability.findall('.//vuln:CVSSScoreSets/vuln:ScoreSet', NAMESPACES)
+            cvss_scores = vulnerability.findall(".//vuln:CVSSScoreSets/vuln:ScoreSet", NAMESPACES)
             for score in cvss_scores:
-                base_score = score.find('vuln:BaseScore', NAMESPACES)
-                vector = score.find('vuln:Vector', NAMESPACES)
+                base_score = score.find("vuln:BaseScore", NAMESPACES)
+                vector = score.find("vuln:Vector", NAMESPACES)
                 if base_score is not None and vector is not None:
                     record["Vulnerability"]["CVSS"].append({
                         "Score": float(base_score.text),
-                        "Vector": vector.text
+                        "Vector": vector.text,
                     })
             # Get fixed package
             for pkg in root.findall('.//prod:Branch[@Type="Package Arch"][@Name="src"]/prod:FullProductName', NAMESPACES):
                 # Get package name (e.g., libxkbfile-1.1.0-6.oe2203sp3.src.rpm)
                 full_name = pkg.text
-                pkg_name = full_name.split('-')[0]
-                fixed_version = '-'.join(full_name.split('-')[1:]).split('.oe')[0] # 1.1.0-6
+                pkg_name = full_name.split("-")[0]
+                fixed_version = "-".join(full_name.split("-")[1:]).split(".oe")[0] # 1.1.0-6
                 # Get openEuler version from CPE (e.g., cpe:/a:openEuler:openEuler:22.03-LTS-SP3)
                 oe_version = ""
-                cpe = pkg.get('CPE')
+                cpe = pkg.get("CPE")
                 if cpe:
-                    oe_version = cpe.split(':')[-1] # 22.03-LTS-SP3
+                    oe_version = cpe.split(":")[-1] # 22.03-LTS-SP3
                 record["Vulnerability"]["FixedIn"].append({
                     "Name": pkg_name,
                     "Version": fixed_version,
                     "NamespaceName": f"{self.namespace}:{oe_version}",
-                    "VersionFormat": "rpm"
+                    "VersionFormat": "rpm",
                 })
             cve_record.append(record)
         return cve_record
-    
+
     def _normalize(self) -> dict[str, dict[str, Any]]:
         """
         Parse all cvrf files, record the cev data 
@@ -136,7 +132,7 @@ class Parser:
                         else:
                             cve_dict[cve_id]["Vulnerability"]["FixedIn"].extend(vuln["Vulnerability"]["FixedIn"])
                 except Exception as e:
-                    self.logger.warning(f"Failed to parse openEuler cvrfs: {str(e)}")
+                    self.logger.warning(f"Failed to parse openEuler cvrfs: {e!s}")
         return cve_dict
 
     def get(self):
