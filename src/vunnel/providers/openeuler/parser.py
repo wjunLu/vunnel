@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import os
 import requests
 from tqdm import tqdm
 
@@ -24,7 +25,7 @@ NAMESPACES = {
 }
 
 class Parser:
-    _cvrf_dir = "openeuler"
+    _cvrf_dir = "cvrf"
     _cvrf_index = "index.txt"
 
     def __init__(
@@ -32,14 +33,16 @@ class Parser:
         workspace: workspace.Workspace,
         url: str,
         namespace: str,
+        max_workers=None,
         download_timeout: int = 125,
         logger: logging.Logger | None = None,
     ):
         self.download_timeout = download_timeout
         self.advisories_dir_path = Path(workspace.input_path) / self._cvrf_dir
+        self.max_workers = max_workers if isinstance(max_workers, int) else 8
         self.url = url
         self.namespace = namespace
-        self.cvrfs = {}
+        self.cvrfs = []
 
         if not logger:
             logger = logging.getLogger(self.__class__.__name__)
@@ -61,56 +64,80 @@ class Parser:
             self.logger.exception(f"Error downloading {self.namespace} advisories from {self.url}")
             raise
         # download all cvrf file, for example, `2025/cvrf-openEuler-SA-2025-1834.xml`
-        with ThreadPoolExecutor() as executor:
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {executor.submit(self._fetch_data, file): file for file in files}
-            for future in tqdm(as_completed(futures), total=len(files), desc=f"downloading {self.namespace} CVRF files"):
+            for future in tqdm(as_completed(futures), total=len(files), desc=f"Downloading {self.namespace} CVRF files"):
                 file = futures[future]
                 try:
                     data = future.result()
-                    if data:
-                        self.cvrfs[file] = data
+                    if not data:
+                        continue
+                    # store cvrfs by year
+                    year = file.split("/")[0]
+                    if not os.path.exists(self.advisories_dir_path / year):
+                        os.makedirs(self.advisories_dir_path / year, exist_ok=True)
+                    # write into xml files
+                    cvrf_file = self.advisories_dir_path / file
+                    with open(cvrf_file, "wb") as fp:
+                        fp.write(data.content)
+                    # record all file sub-directorys
+                    self.cvrfs.append(file)
                 except Exception as e:
-                    self.logger.warning(f"Failed to download {file}: {e!s}")
+                    self.logger.warning(f"Failed to download {file}: {e}")
 
-    def _parse_cves_from_cvrf(self, cvrf: tuple):
-        cve_record = []
-        url, content = cvrf
-        root = ET.fromstring(content.text)
+    def _parse_cves_from_cvrf(self, cvrf: str):
+        cve_record = {}
+        tree = ET.parse(self.advisories_dir_path / cvrf)
+        root = tree.getroot()
         for vulnerability in root.findall(".//vuln:Vulnerability", NAMESPACES):
-            record = copy.deepcopy(vulnerability_element)
-            record["Vulnerability"]["Name"] = vulnerability.find("vuln:CVE", NAMESPACES).text
-            record["Vulnerability"]["NamespaceName"] = f"{self.namespace}:{url.split('/')[0]}"
-            record["Vulnerability"]["Link"] = vulnerability.find(".//vuln:Remediation/vuln:URL", NAMESPACES).text
-            record["Vulnerability"]["Description"] = vulnerability.find('.//vuln:Note[@Title="Vulnerability Description"]', NAMESPACES).text
-            record["Vulnerability"]["Severity"] = vulnerability.find(".//vuln:Threat/vuln:Description", NAMESPACES).text
-            # Get CVSS
+            # common info
+            vuln_name = vulnerability.find("vuln:CVE", NAMESPACES).text
+            vuln_link = vulnerability.find(".//vuln:Remediation/vuln:URL", NAMESPACES).text
+            vuln_desc = vulnerability.find('.//vuln:Note[@Title="Vulnerability Description"]', NAMESPACES).text
+            vuln_seve = vulnerability.find(".//vuln:Threat/vuln:Description", NAMESPACES).text
+            # CVSS
+            vuln_cvss = []
             cvss_scores = vulnerability.findall(".//vuln:CVSSScoreSets/vuln:ScoreSet", NAMESPACES)
             for score in cvss_scores:
                 base_score = score.find("vuln:BaseScore", NAMESPACES)
                 vector = score.find("vuln:Vector", NAMESPACES)
                 if base_score is not None and vector is not None:
-                    record["Vulnerability"]["CVSS"].append({
+                    vuln_cvss.append({
                         "Score": float(base_score.text),
                         "Vector": vector.text,
                     })
-            # Get fixed package
+
+            # store cves by openEuler releases
             for pkg in root.findall('.//prod:Branch[@Type="Package Arch"][@Name="src"]/prod:FullProductName', NAMESPACES):
-                # Get package name (e.g., libxkbfile-1.1.0-6.oe2203sp3.src.rpm)
+                record = copy.deepcopy(vulnerability_element)
+                record["Vulnerability"]["Name"] = vuln_name
+                record["Vulnerability"]["Link"] = vuln_link
+                record["Vulnerability"]["Description"] = vuln_desc
+                record["Vulnerability"]["Severity"] = vuln_seve
+                record["Vulnerability"]["CVSS"] = vuln_cvss
+                
+                # Get openEuler version from CPE (e.g., cpe:/a:openEuler:openEuler:22.03-LTS-SP3)
+                cpe = pkg.get("CPE")
+                if not cpe:
+                    continue
+                release = cpe.split(":")[-1] # e.g., 22.03-LTS-SP3
+                full_namespace = f"{self.namespace}:{release}" # e.g., openeuler: 22.03-LTS-SP3
+                record["Vulnerability"]["NamespaceName"] = full_namespace
+
+                # Get fixed package name (e.g., libxkbfile-1.1.0-6.oe2203sp3.src.rpm)
                 full_name = pkg.text
                 pkg_name = full_name.split("-")[0]
-                fixed_version = "-".join(full_name.split("-")[1:]).split(".oe")[0] # 1.1.0-6
-                # Get openEuler version from CPE (e.g., cpe:/a:openEuler:openEuler:22.03-LTS-SP3)
-                oe_version = ""
-                cpe = pkg.get("CPE")
-                if cpe:
-                    oe_version = cpe.split(":")[-1] # 22.03-LTS-SP3
+                fixed_version = "-".join(full_name.split("-")[1:]).split(".src")[0] # 1.1.0-6.src
                 record["Vulnerability"]["FixedIn"].append({
                     "Name": pkg_name,
                     "Version": fixed_version,
-                    "NamespaceName": f"{self.namespace}:{oe_version}",
+                    "NamespaceName": full_namespace,
                     "VersionFormat": "rpm",
                 })
-            cve_record.append(record)
+            if "full_namespace" not in cve_record:
+                cve_record["full_namespace"] = []
+            cve_record["full_namespace"].append(record)
+            
         return cve_record
 
     def _normalize(self) -> dict[str, dict[str, Any]]:
@@ -120,8 +147,8 @@ class Parser:
         :return:
         """
         cve_dict = {}
-        with ThreadPoolExecutor() as executor:
-            futures = {executor.submit(self._parse_cves_from_cvrf, cvrf): cvrf for cvrf in self.cvrfs.items()}
+        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = {executor.submit(self._parse_cves_from_cvrf, cvrf): cvrf for cvrf in self.cvrfs}
             for future in as_completed(futures):
                 try:
                     data = future.result()
@@ -137,15 +164,9 @@ class Parser:
 
     def get(self):
         """
-        Download, load and normalize wolfi sec db and return a dict of release - list of vulnerability records
+        Download, load and normalize openeuler sec db and return a dict of release - list of vulnerability records
         :return:
         """
-        try:
-            # download the data
-            self._download()
-            yield self._normalize()
-        finally:
-            # clear memory for cvrfs dict
-            if self.cvrfs:
-                self.cvrfs.clear()
-                del self.cvrfs
+        # download the data
+        self._download()
+        yield self._normalize()

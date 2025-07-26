@@ -21,6 +21,7 @@ class Config:
         ),
     )
     request_timeout: int = 125
+    parallelism: int = 8
 
 
 class Provider(provider.Provider):
@@ -39,6 +40,7 @@ class Provider(provider.Provider):
 
         self.parser = Parser(
             workspace=self.workspace,
+            max_workers=self.config.parallelism,
             url=self._url,
             namespace=self._namespace,
             download_timeout=self.config.request_timeout,
