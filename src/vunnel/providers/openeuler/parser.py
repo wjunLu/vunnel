@@ -60,7 +60,7 @@ class Parser:
             raise
         # download all csaf file, for example, `2025/csaf-openeuler-sa-2024-1650.json`
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {executor.submit(self._fetch_data, file): file for file in files}
+            futures = {executor.submit(self._fetch_data, file): file for file in files[:10]}
             for future in tqdm(as_completed(futures), total=len(files), desc=f"Downloading {self.namespace} CSAF files"):
                 file = futures[future]
                 try:
@@ -110,6 +110,7 @@ class Parser:
             vuln_link = self._get_cve_link(references=references, cve_id=vuln_name)
             vuln_desc = self._get_cve_description(notes=vuln.get("notes", []))
             vuln_cvss = []
+            vuln_seve = ""
             cvss = vuln.get("scores", [])[0].get("cvss_v3", {})
             if cvss:
                 vuln_seve = cvss.get("baseSeverity")
