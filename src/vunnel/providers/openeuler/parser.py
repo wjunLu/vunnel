@@ -76,7 +76,6 @@ class Parser:
                     with open(csaf_file, "wb") as fp:
                         fp.write(data.content)
                     # record all stored file paths
-                    print(f"csaf type: {type(file)}")
                     self.csafs.append(file)
                 except Exception as e:
                     self.logger.warning(f"Failed to download {file}: {e}")
@@ -110,7 +109,6 @@ class Parser:
             vuln_desc = self._get_cve_description(notes=vuln.get("notes", []))
             vuln_cvss = []
             vuln_seve = ""
-            print(f"vuln_name={vuln_name}, \nvuln_link={vuln_link}, \nvuln_desc={vuln_desc}")
             cvss = vuln.get("scores", [])[0].get("cvss_v3", {})
             if cvss:
                 vuln_seve = cvss.get("baseSeverity")
