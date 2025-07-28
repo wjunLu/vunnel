@@ -82,7 +82,7 @@ class Parser:
 
     def _get_cve_link(references: list, cve_id: str) -> str:
         for ref in references:
-            if ref.get("category") == "self" and cve_id in ref.get("summary", ""):
+            if ref.get("category") == "self" and cve_id == ref.get("summary", ""):
                 return ref.get("url", "")
         return ""
             
@@ -97,6 +97,8 @@ class Parser:
         with open(self.advisories_dir_path / csaf, 'r') as f:
             root = json.load(f)    
         references = root.get("document", {}).get("references", [])
+        print("Ref Type: ", type(references))
+        print("Ref length: ", len(references))
         vulns = root.get("vulnerabilities", [])
         if not vulns:
             return {}
