@@ -80,13 +80,13 @@ class Parser:
                 except Exception as e:
                     self.logger.warning(f"Failed to download {file}: {e}")
 
-    def _get_cve_link(references: list, cve_id: str) -> str:
+    def _get_cve_link(self, references: list, cve_id: str) -> str:
         for ref in references:
             if ref.get("category") == "self" and cve_id == ref.get("summary", ""):
                 return ref.get("url", "")
         return ""
             
-    def _get_cve_description(notes: list) -> str:
+    def _get_cve_description(self, notes: list) -> str:
         for note in notes:
             if note.get("category") == "description":
                 return note.get("text", "")
