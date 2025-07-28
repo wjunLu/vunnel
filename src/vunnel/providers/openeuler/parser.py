@@ -60,7 +60,7 @@ class Parser:
             raise
         # download all csaf file, for example, `2025/csaf-openeuler-sa-2024-1650.json`
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = {executor.submit(self._fetch_data, file): file for file in files[:10]}
+            futures = {executor.submit(self._fetch_data, file): file for file in files}
             for future in tqdm(as_completed(futures), total=len(files), desc=f"Downloading {self.namespace} CSAF files"):
                 file = futures[future]
                 try:
@@ -76,6 +76,7 @@ class Parser:
                     with open(csaf_file, "wb") as fp:
                         fp.write(data.content)
                     # record all stored file paths
+                    print(f"csaf type: {type(file)}")
                     self.csafs.append(file)
                 except Exception as e:
                     self.logger.warning(f"Failed to download {file}: {e}")
@@ -97,8 +98,6 @@ class Parser:
         with open(self.advisories_dir_path / csaf, 'r') as f:
             root = json.load(f)    
         references = root.get("document", {}).get("references", [])
-        print("Ref Type: ", type(references))
-        print("Ref length: ", len(references))
         vulns = root.get("vulnerabilities", [])
         if not vulns:
             return {}
@@ -111,6 +110,7 @@ class Parser:
             vuln_desc = self._get_cve_description(notes=vuln.get("notes", []))
             vuln_cvss = []
             vuln_seve = ""
+            print(f"vuln_name={vuln_name}, \nvuln_link={vuln_link}, \nvuln_desc={vuln_desc}")
             cvss = vuln.get("scores", [])[0].get("cvss_v3", {})
             if cvss:
                 vuln_seve = cvss.get("baseSeverity")
@@ -173,10 +173,10 @@ class Parser:
                     data = future.result()
                     for namespace, vuln_dict in data.items():
                         for cve_id, vuln in vuln_dict.items():
-                            if (namespace := cve_dict.setdefault(namespace, {})) and (existing_record := namespace.get(cve_id)):
+                            if (ns_record := cve_dict.setdefault(namespace, {})) and (existing_record := ns_record.get(cve_id)):
                                 existing_record["Vulnerability"]["FixedIn"].extend(vuln["Vulnerability"]["FixedIn"])
                             else:
-                                namespace[cve_id] = vuln
+                                ns_record[cve_id] = vuln
                 except Exception as e:
                     self.logger.warning(f"Failed to parse openEuler csafs: {e}")
         
